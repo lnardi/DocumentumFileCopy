@@ -73,7 +73,7 @@ public class DocumentumFileCopy {
                 System.out.println("Não foram encontrados arquivos para processamento");
             }
             System.out.println("verificando se existem outros csvs");
-        } catch (IOException ex) {
+        } catch (Exception ex) {
             LOGGER.log(Level.SEVERE, null, ex);
         }
     }
@@ -88,18 +88,18 @@ public class DocumentumFileCopy {
         });
     }
 
-    private void readCSV(File csv) throws IOException {
+    private void readCSV(File csv) throws IOException, Exception {
 
         BufferedReader csvInput = null;
         BufferedWriter csvOutput = null;
         String line = "";
         String cvsSplitBy = ";";
-        int serverPathPosition = 0;
-        int robjectidPosition = 0;
-        int revisionField = 0;
+        int serverPathPosition = -1;
+        int robjectidPosition = -1;
+        int revisionField = -1;
         String serverPath = "server_path";
         String r_object_ID = "r_object_id";
-        String revisao = "revisao";
+        String revision = "revisao";
         long totalCopiedSize = 0;
         long maxSize = Long.parseLong(PropertieFileUseful.getProp("maxSize"));
         int fileNumber = 1;
@@ -128,14 +128,15 @@ public class DocumentumFileCopy {
                 if (r_object_ID.equals(column)) {
                     robjectidPosition = i;
                 }
-                if (revisao.equals(column)) {
+                if (revision.equals(column)) {
                     revisionField = i;
                 }
             }
 
-            if (serverPathPosition == 0) {
-                System.out.println("Não encontou a coluna");
-                //TODO - tratar erro
+            if (serverPathPosition == -1 || robjectidPosition == -1 || revisionField == -1) {
+                String msg = "Não encontou a coluna r_object_id ou server_path no arquivo " + csv.getName();
+                System.out.println(msg);
+                throw new Exception(msg);
             }
 
             while ((line = csvInput.readLine()) != null) {
@@ -176,15 +177,16 @@ public class DocumentumFileCopy {
                     totalCopiedSize += fileInput.length();//Registra o tamanho do arqivo;
                     csvOutput.write(line + ";" + outputFileName);
                     csvOutput.newLine();
-                } //Arquivo de entrada não existe no caminho especificado.
-                if (!columns[revisionField].equals("-1")) { // e não é uma ficha
-                    writeErrorFile(line, csv.getName());
-                    LOGGER.log(Level.SEVERE, line, "Arquivo Inexistente");
-                } else {//Se é ficha pula o processamento.
-                    csvOutput.write(line + ";" + outputFileName);
-                    csvOutput.newLine();
+                } else {//Arquivo de entrada não existe no caminho especificado.
+                    if (revisionField >= 0 && !columns[revisionField].equals("-1")) { // e não é uma ficha
+                        writeErrorFile(line, csv.getName());
+                        System.out.println("Arquivo Inexistente : " + fileInput.getName());
+                        LOGGER.log(Level.SEVERE, line, "Arquivo Inexistente");
+                    } else {//Se é ficha pula o processamento.
+                        csvOutput.write(line + ";" + outputFileName);                        
+                        csvOutput.newLine();
+                    }
                 }
-
                 processedFiles++;
                 //Exibe o tempo de processamento
                 if (processedFiles < 100 ? processedFiles % 10 == 0 : processedFiles % 100 == 0) {
@@ -200,7 +202,12 @@ public class DocumentumFileCopy {
                 csvInput.close();
             }
             if (csvOutput != null) {
+                csvOutput.flush();
                 csvOutput.close();
+            }
+            if (csvOutputError != null) {
+                csvOutputError.flush();
+                csvOutputError.close();
             }
         }
 

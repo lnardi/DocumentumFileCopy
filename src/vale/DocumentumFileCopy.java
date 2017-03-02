@@ -18,6 +18,8 @@ import java.io.OutputStream;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.io.BufferedWriter;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.logging.FileHandler;
 import java.util.logging.Handler;
 
@@ -106,15 +108,16 @@ public class DocumentumFileCopy {
         int processedFiles = 0;
 
         try {
+            String timeStamp = getStringDate();
             csvInput = new BufferedReader(new FileReader(csv));
             lineHeader = csvInput.readLine();//Pega o cabeçalho do arquivo//Armazena para utilizar no error                        
-            csvOutput = new BufferedWriter(new FileWriter(processProperties.getProp("outputPath") + "/" + csv.getName()));
+            csvOutput = new BufferedWriter(new FileWriter(processProperties.getProp("outputPath") + "/" + timeStamp + "_" + csv.getName()));
             csvOutput.write(lineHeader + ";output_FileName");
             csvOutput.newLine();
             String[] header = lineHeader.split(cvsSplitBy);
             //Seta o caminho onde os arquivos serão copiados
-            String outputPath = PropertieFileUseful.getProp("outputPath") + csv.getName() + "_" + fileNumber + "/";
-            String outputPathProcessing = PropertieFileUseful.getProp("outputPath") + csv.getName() + "_" + fileNumber + "_Processing/";
+            String outputPath = PropertieFileUseful.getProp("outputPath") + timeStamp + "_" + csv.getName() + "_" + fileNumber + "/";
+            String outputPathProcessing = PropertieFileUseful.getProp("outputPath") + timeStamp + "_" + csv.getName() + "_" + fileNumber + "_Processing/";
 
             makeDir(outputPathProcessing);
 
@@ -133,7 +136,7 @@ public class DocumentumFileCopy {
                 }
             }
 
-            if (serverPathPosition == -1 || robjectidPosition == -1 || revisionField == -1) {
+            if (serverPathPosition == -1 || robjectidPosition == -1) {
                 String msg = "Não encontou a coluna r_object_id ou server_path no arquivo " + csv.getName();
                 System.out.println(msg);
                 throw new Exception(msg);
@@ -149,42 +152,46 @@ public class DocumentumFileCopy {
                         //TODO - ERRO DE PROCESSAMENTO, REPORTAR UMA EXCEPTION
                     }
                     //criar novos
-                    outputPathProcessing = PropertieFileUseful.getProp("outputPath") + csv.getName() + "_" + ++fileNumber + "_Processing/";
-                    outputPath = PropertieFileUseful.getProp("outputPath") + csv.getName() + "_" + ++fileNumber + "/";
+                    outputPathProcessing = PropertieFileUseful.getProp("outputPath") + timeStamp + "_" + csv.getName() + "_" + ++fileNumber + "_Processing/";
+                    outputPath = PropertieFileUseful.getProp("outputPath") + timeStamp + "_" + csv.getName() + "_" + ++fileNumber + "/";
 
                     makeDir(outputPathProcessing);
                 }
+
                 // use comma as separator
                 String[] columns = line.split(cvsSplitBy);
-                String path = columns[serverPathPosition];
-                String robjectid = columns[robjectidPosition];
-                //get extension
-                String[] pathSplit = path.split("\\.");
-                String extension = pathSplit.length > 1 ? "." + pathSplit[pathSplit.length - 1] : "";
-                String outputFileName = robjectid + extension;
 
-                //Copia o arquivo
-                File fileInput = new File(path);
-                if (fileInput.exists()) {
-                    try {
-                        copyFileUsingStream(fileInput, new File(outputPathProcessing + outputFileName));
-                    } catch (IOException ex) {
-                        //Falha no processamento da cópia
-                        writeErrorFile(line, csv.getName());
-                        LOGGER.log(Level.SEVERE, line, ex);
-                    }
-                    //
-                    totalCopiedSize += fileInput.length();//Registra o tamanho do arqivo;
-                    csvOutput.write(line + ";" + outputFileName);
+                //Se for uma ficha, ou seja, tem revisão. Não precisa verificar se o arquivo existe
+                if (revisionField >= 0 && columns[revisionField].equals("-1")) {
+                    csvOutput.write(line + ";");
                     csvOutput.newLine();
-                } else {//Arquivo de entrada não existe no caminho especificado.
-                    if (revisionField >= 0 && !columns[revisionField].equals("-1")) { // e não é uma ficha
-                        writeErrorFile(line, csv.getName());
+                } else {//Caso contrário procede com o processamento
+
+                    String path = columns[serverPathPosition];
+                    String robjectid = columns[robjectidPosition];
+                    //get extension
+                    String[] pathSplit = path.split("\\.");
+                    String extension = pathSplit.length > 1 ? "." + pathSplit[pathSplit.length - 1] : "";
+                    String outputFileName = robjectid + extension;
+
+                    //Copia o arquivo
+                    File fileInput = new File(path);
+                    if (fileInput.exists()) {
+                        try {
+                            copyFileUsingStream(fileInput, new File(outputPathProcessing + outputFileName));
+                        } catch (IOException ex) {
+                            //Falha no processamento da cópia
+                            writeErrorFile(line, timeStamp + "_" + csv.getName());
+                            LOGGER.log(Level.SEVERE, line, ex);
+                        }
+                        //
+                        totalCopiedSize += fileInput.length();//Registra o tamanho do arqivo;
+                        csvOutput.write(line + ";" + outputFileName);
+                        csvOutput.newLine();
+                    } else {//Arquivo de entrada não existe no caminho especificado.                        
+                        writeErrorFile(line, timeStamp + "_" + csv.getName());
                         System.out.println("Arquivo Inexistente : " + fileInput.getName());
                         LOGGER.log(Level.SEVERE, line, "Arquivo Inexistente");
-                    } else {//Se é ficha pula o processamento.
-                        csvOutput.write(line + ";" + outputFileName);                        
-                        csvOutput.newLine();
                     }
                 }
                 processedFiles++;
@@ -232,10 +239,21 @@ public class DocumentumFileCopy {
 
     private boolean moveFile(File p_file, String p_dir) {
         File file = p_file;
-// Destination directory
+        // Destination directory
         File dir = new File(p_dir);
-// Move file to new directory
-        return file.renameTo(new File(dir, file.getName()));
+
+        String name = getStringDate() + "_" + file.getName();
+
+        // Move file to new directory
+        boolean result = file.renameTo(new File(dir, name));
+
+        return result;
+    }
+
+    private String getStringDate() {
+        java.util.Date date = new java.util.Date();
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd_hmmss");
+        return sdf.format(date);
     }
 
     private void makeDir(String outputPath) {

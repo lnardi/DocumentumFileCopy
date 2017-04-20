@@ -20,8 +20,10 @@ import java.util.logging.Logger;
 import java.io.BufferedWriter;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.logging.ConsoleHandler;
 import java.util.logging.FileHandler;
 import java.util.logging.Handler;
+import java.util.logging.SimpleFormatter;
 
 /**
  *
@@ -40,44 +42,58 @@ public class DocumentumFileCopy {
      */
     public static void main(String[] args) {
         DocumentumFileCopy docFC = new DocumentumFileCopy();
-        docFC.processFiles();
-
-    }
-
-    public void processFiles() {
         try {
-//Creating consoleHandler and fileHandler
-            Handler fileHandler = null;
-            fileHandler = new FileHandler("./documentumFileCopy_%u.log", 10000000, 3, false);
-
-            //Assigning handlers to LOGGER object
-            LOGGER.setUseParentHandlers(false);
-            LOGGER.addHandler(fileHandler);
-            //Setting levels to handlers and LOGGER
-            fileHandler.setLevel(Level.ALL);
-            LOGGER.setLevel(Level.ALL);
-
-            processProperties = new PropertieFileUseful("config.properties");
-            startTime = System.currentTimeMillis();
-
-            System.out.println("Iniciando");
-            System.out.println("carregando CSVs");
-            File[] csvs = finder("./");
-            if (csvs != null && csvs.length > 0) {
-                for (File csv : csvs) {
-                    System.out.println("processando primeiro CSV");
-                    readCSV(csv);
-                    System.out.println("Movendo CSV: " + csv.getName());
-                    moveFile(csv, PropertieFileUseful.getProp("processedPath"));//TODO - PODER RETORNAR FALHA
-                }
-
-            } else {
-                System.out.println("Não foram encontrados arquivos para processamento");
-            }
-            System.out.println("verificando se existem outros csvs");
+            docFC.logConfig();
+            docFC.processFiles();
         } catch (Exception ex) {
             LOGGER.log(Level.SEVERE, null, ex);
         }
+    }
+
+    public void processFiles() throws IOException, Exception {
+
+        processProperties = new PropertieFileUseful("config.properties");
+        startTime = System.currentTimeMillis();
+
+        System.out.println("Iniciando");
+        System.out.println("carregando CSVs");
+        File[] csvs = finder("./");
+        if (csvs != null && csvs.length > 0) {
+            for (File csv : csvs) {
+                LOGGER.log(Level.INFO, "Processando CSV: " + csv.getName());
+                System.out.println("Processando CSV: " + csv.getName());
+                readCSV(csv);
+                LOGGER.log(Level.INFO, "Movendo CSV: " + csv.getName());
+                System.out.println("Movendo CSV: " + csv.getName());
+                moveFile(csv, PropertieFileUseful.getProp("processedPath"));//TODO - PODER RETORNAR FALHA
+            }
+
+        } else {
+            LOGGER.log(Level.INFO, "Não foram encontrados arquivos para processamento");
+            System.out.println("Não foram encontrados arquivos para processamento");
+        }
+        LOGGER.log(Level.INFO, "verificando se existem outros csvs");
+        System.out.println("verificando se existem outros csvs");
+    }
+
+    private void logConfig() throws IOException {
+        Handler fileHandler = null;
+        fileHandler = new FileHandler("./documentumFileCopy_%u.log", 10000000, 3, true);
+        SimpleFormatter formatter = new SimpleFormatter();
+
+        fileHandler.setFormatter(formatter);
+
+        //Assigning handlers to LOGGER object
+        LOGGER.setUseParentHandlers(false);
+        LOGGER.addHandler(fileHandler);
+
+        //ConsoleHandler chandler = new ConsoleHandler();
+        //chandler.setFormatter(new SimpleFormatter());
+
+        //LOGGER.addHandler(chandler);
+        //Setting levels to handlers and LOGGER
+        fileHandler.setLevel(Level.ALL);
+        LOGGER.setLevel(Level.ALL);
     }
 
     public File[] finder(String dirName) {
@@ -149,11 +165,14 @@ public class DocumentumFileCopy {
                     //Renomear antigos
                     if (!renameDir(outputPathProcessing, outputPath)) {
                         System.out.println("Falha de processamento ao renomear folder de saída");
+                        LOGGER.log(Level.SEVERE, "Falha de processamento ao renomear folder de saída");
+                        LOGGER.log(Level.SEVERE, "From: " + outputPathProcessing);
+                        LOGGER.log(Level.SEVERE, "To: " + outputPath);
                         //TODO - ERRO DE PROCESSAMENTO, REPORTAR UMA EXCEPTION
                     }
                     //criar novos
                     outputPathProcessing = PropertieFileUseful.getProp("outputPath") + timeStamp + "_" + csv.getName() + "_" + ++fileNumber + "_Processing/";
-                    outputPath = PropertieFileUseful.getProp("outputPath") + timeStamp + "_" + csv.getName() + "_" + ++fileNumber + "/";
+                    outputPath = PropertieFileUseful.getProp("outputPath") + timeStamp + "_" + csv.getName() + "_" + fileNumber + "/";
 
                     makeDir(outputPathProcessing);
                 }
@@ -161,12 +180,11 @@ public class DocumentumFileCopy {
                 // use comma as separator
                 String[] columns = line.split(cvsSplitBy);
 
-                //Se for uma ficha, ou seja, tem revisão. Não precisa verificar se o arquivo existe
-                if (revisionField >= 0 && columns[revisionField].equals("-1")) {
+                //Se for uma ficha, ou seja tem revisão, também poder ser um arquivo sem conteúdo por outro motivo. Não precisa verificar se o arquivo existe.
+                if ((revisionField >= 0 && columns[revisionField].equals("-1")) || serverPathPosition >= columns.length) {
                     csvOutput.write(line + ";");
                     csvOutput.newLine();
                 } else {//Caso contrário procede com o processamento
-
                     String path = columns[serverPathPosition];
                     String robjectid = columns[robjectidPosition];
                     //get extension
@@ -182,6 +200,7 @@ public class DocumentumFileCopy {
                         } catch (IOException ex) {
                             //Falha no processamento da cópia
                             writeErrorFile(line, timeStamp + "_" + csv.getName());
+                            System.out.println("Falha ao copiar arquivo: " + fileInput.getName());
                             LOGGER.log(Level.SEVERE, line, ex);
                         }
                         //
@@ -197,24 +216,30 @@ public class DocumentumFileCopy {
                 processedFiles++;
                 //Exibe o tempo de processamento
                 if (processedFiles < 100 ? processedFiles % 10 == 0 : processedFiles % 100 == 0) {
-                    System.out.println("Processando arquivo número " + processedFiles + "  - Tempo de Processamento: " + ((System.currentTimeMillis() - startTime) / 1000 / 60) + " Minutos");
+                    System.out.println(csv.getName() + " - Linha " + processedFiles + "  - Tempo : " + ((System.currentTimeMillis() - startTime) / 1000 / 60) + " min");
                 }
             }
             if (!renameDir(outputPathProcessing, outputPath)) {
                 System.out.println("Falha de processamento ao renomear arquivos");
+                LOGGER.log(Level.SEVERE, "Falha de processamento ao renomear arquivos");
+                LOGGER.log(Level.SEVERE, "From: " + outputPathProcessing);
+                LOGGER.log(Level.SEVERE, "To: " + outputPath);
             }
 
         } finally {
             if (csvInput != null) {
                 csvInput.close();
+                csvInput = null;
             }
             if (csvOutput != null) {
                 csvOutput.flush();
                 csvOutput.close();
+                csvOutput = null;
             }
             if (csvOutputError != null) {
                 csvOutputError.flush();
                 csvOutputError.close();
+                csvOutputError = null;
             }
         }
 

@@ -209,7 +209,7 @@ public class DocumentumFileCopy {
                         csvOutput.newLine();
                     } else {//Arquivo de entrada não existe no caminho especificado.                        
                         writeErrorFile(line, timeStamp + "_" + csv.getName());
-                        System.out.println("Arquivo Inexistente : " + fileInput.getName());
+                        System.out.println("Arquivo Inexistente : " + fileInput.getName() + " - Line-Item: " + columns[0]);
                         LOGGER.log(Level.SEVERE, line, "Arquivo Inexistente");
                     }
                 }

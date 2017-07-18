@@ -57,8 +57,13 @@ public class DocumentumFileCopy {
 
         System.out.println("Iniciando");
         System.out.println("carregando CSVs");
+        //Lista os arquivos existentes
         File[] csvs = finder("./");
-        if (csvs != null && csvs.length > 0) {
+        if (csvs == null || csvs.length <= 0) {
+            LOGGER.log(Level.INFO, "Não foram encontrados arquivos para processamento");
+            System.out.println("Não foram encontrados arquivos para processamento");
+        }
+        while (csvs != null && csvs.length > 0) {
             for (File csv : csvs) {
                 LOGGER.log(Level.INFO, "Processando CSV: " + csv.getName());
                 System.out.println("Processando CSV: " + csv.getName());
@@ -68,12 +73,16 @@ public class DocumentumFileCopy {
                 moveFile(csv, PropertieFileUseful.getProp("processedPath"));//TODO - PODER RETORNAR FALHA
             }
 
-        } else {
-            LOGGER.log(Level.INFO, "Não foram encontrados arquivos para processamento");
-            System.out.println("Não foram encontrados arquivos para processamento");
+            LOGGER.log(Level.INFO, "verificando se existem outros csvs");
+            System.out.println("verificando se existem outros csvs");
+            csvs = finder("./");
+
+            if (csvs == null || csvs.length <= 0) {
+                LOGGER.log(Level.INFO, "Não foram encontrados arquivos para processamento");
+                System.out.println("Não foram encontrados arquivos para processamento");
+            }
         }
-        LOGGER.log(Level.INFO, "verificando se existem outros csvs");
-        System.out.println("verificando se existem outros csvs");
+
     }
 
     private void logConfig() throws IOException {
@@ -89,7 +98,6 @@ public class DocumentumFileCopy {
 
         //ConsoleHandler chandler = new ConsoleHandler();
         //chandler.setFormatter(new SimpleFormatter());
-
         //LOGGER.addHandler(chandler);
         //Setting levels to handlers and LOGGER
         fileHandler.setLevel(Level.ALL);
@@ -115,13 +123,16 @@ public class DocumentumFileCopy {
         int serverPathPosition = -1;
         int robjectidPosition = -1;
         int revisionField = -1;
+        int codigoSiteField = -1;
         String serverPath = "server_path";
         String r_object_ID = "r_object_id";
         String revision = "revisao";
+        String codigoSite = "codigo_site";
         long totalCopiedSize = 0;
-        long maxSize = Long.parseLong(PropertieFileUseful.getProp("maxSize"));
+        //long maxSize = Long.parseLong(PropertieFileUseful.getProp("maxSize"));
         int fileNumber = 1;
         int processedFiles = 0;
+        boolean folderCreated = false;
 
         try {
             String timeStamp = getStringDate();
@@ -135,8 +146,7 @@ public class DocumentumFileCopy {
             String outputPath = PropertieFileUseful.getProp("outputPath") + timeStamp + "_" + csv.getName() + "_" + fileNumber + "/";
             String outputPathProcessing = PropertieFileUseful.getProp("outputPath") + timeStamp + "_" + csv.getName() + "_" + fileNumber + "_Processing/";
 
-            makeDir(outputPathProcessing);
-
+            //makeDir(outputPathProcessing);
             //cria diretório a cada x arquivos.
             for (int i = 0; i < header.length; i++) {
 
@@ -150,39 +160,41 @@ public class DocumentumFileCopy {
                 if (revision.equals(column)) {
                     revisionField = i;
                 }
+                if (codigoSite.equals(column)) {
+                    codigoSiteField = i;
+                }
+
             }
 
-            if (serverPathPosition == -1 || robjectidPosition == -1) {
-                String msg = "Não encontou a coluna r_object_id ou server_path no arquivo " + csv.getName();
+            if (serverPathPosition == -1 || robjectidPosition == -1 || codigoSiteField == -1) {
+                String msg = "Não encontou a coluna r_object_id, codigo_site ou server_path no arquivo " + csv.getName();
                 System.out.println(msg);
                 throw new Exception(msg);
             }
 
             while ((line = csvInput.readLine()) != null) {
-                //Cria um novo folder quando o total de arquivos copiado atinge um tamanho determinado.                
-                if (totalCopiedSize >= maxSize) {
-                    totalCopiedSize = 0;
-                    //Renomear antigos
-                    if (!renameDir(outputPathProcessing, outputPath)) {
+
+                // use comma as separator
+                String[] columns = line.split(cvsSplitBy);
+                outputPath = PropertieFileUseful.getProp("outputPath") + columns[codigoSiteField] + "/";
+                outputPathProcessing = PropertieFileUseful.getProp("outputPath") + columns[codigoSiteField] + "_Processing/";
+
+                //Renomeia se existir ou cria um novo folder
+                if (!folderCreated) {
+                    if (!renameDir(outputPath, outputPathProcessing)) {
                         System.out.println("Falha de processamento ao renomear folder de saída");
                         LOGGER.log(Level.SEVERE, "Falha de processamento ao renomear folder de saída");
                         LOGGER.log(Level.SEVERE, "From: " + outputPathProcessing);
                         LOGGER.log(Level.SEVERE, "To: " + outputPath);
                         //TODO - ERRO DE PROCESSAMENTO, REPORTAR UMA EXCEPTION
+                    } else {
+                        folderCreated = true;
                     }
-                    //criar novos
-                    outputPathProcessing = PropertieFileUseful.getProp("outputPath") + timeStamp + "_" + csv.getName() + "_" + ++fileNumber + "_Processing/";
-                    outputPath = PropertieFileUseful.getProp("outputPath") + timeStamp + "_" + csv.getName() + "_" + fileNumber + "/";
-
-                    makeDir(outputPathProcessing);
                 }
-
-                // use comma as separator
-                String[] columns = line.split(cvsSplitBy);
 
                 //Se for uma ficha, ou seja tem revisão, também poder ser um arquivo sem conteúdo por outro motivo. Não precisa verificar se o arquivo existe.
                 if ((revisionField >= 0 && columns[revisionField].equals("-1")) || serverPathPosition >= columns.length) {
-                    csvOutput.write(line + ";");
+                    csvOutput.write(line + ";<<SEM CONTEÚDO>>");
                     csvOutput.newLine();
                 } else {//Caso contrário procede com o processamento
                     String path = columns[serverPathPosition];
@@ -248,17 +260,20 @@ public class DocumentumFileCopy {
     private static void copyFileUsingStream(File source, File dest) throws IOException {
         InputStream is = null;
         OutputStream os = null;
-        try {
-            is = new FileInputStream(source);
-            os = new FileOutputStream(dest);
-            byte[] buffer = new byte[1024];
-            int length;
-            while ((length = is.read(buffer)) > 0) {
-                os.write(buffer, 0, length);
+        //Se o destino já existir, não copia.
+        if (!dest.exists()) {
+            try {
+                is = new FileInputStream(source);
+                os = new FileOutputStream(dest);
+                byte[] buffer = new byte[1024];
+                int length;
+                while ((length = is.read(buffer)) > 0) {
+                    os.write(buffer, 0, length);
+                }
+            } finally {
+                is.close();
+                os.close();
             }
-        } finally {
-            is.close();
-            os.close();
         }
     }
 
@@ -289,13 +304,22 @@ public class DocumentumFileCopy {
 
     }
 
-    private boolean renameDir(String outputPathProcessing, String outputPath) {
+    private boolean renameDir(String oldPath, String newPath) {
         // File (or directory) with old name
-        File oldFile = new File(outputPathProcessing);
+        File oldFile = new File(oldPath);
         // File (or directory) with new name
-        File newFile = new File(outputPath);
-        // Rename file (or directory)
-        return oldFile.renameTo(newFile);
+        File newFile = new File(newPath);
+        if (oldFile.exists()) {
+            // Rename file (or directory)
+            return oldFile.renameTo(newFile);
+        } else {
+            if (!newFile.exists()) {
+                return newFile.mkdir();
+            } else {
+                return true;
+            }
+        }
+
     }
 
     private void writeErrorFile(String line, String name) throws IOException {
